@@ -1,0 +1,14 @@
+// Data-parallel reduce over a columnar pool. Eight rows each hold 2.5; `reduce(+, v)` folds the
+// column to 20.0. The canonical arche compute demo — a pool + a monoid reduce + `fmt` output.
+#import { fmt }
+
+v :: float;
+P :: arche { v }
+[8]P(8) { v: 2.5 };
+
+show :: system (query { v }) eff {
+  total := reduce(+, v);
+  fmt.printf("sum=%.1f\n", total);
+}
+
+#run seq({ show })

@@ -1,0 +1,14 @@
+# Build artifacts — regenerate with `make wasm`
+www/*.wasm
+*.ll
+
+# Node / Playwright (package-lock.json IS committed)
+node_modules/
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/
+
+# OS / editor cruft
+.DS_Store
+*.swp

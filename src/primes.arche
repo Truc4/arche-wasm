@@ -1,0 +1,19 @@
+// Control flow in a `system`: a trial-division sieve counting the primes below 100 (= 25). Shows that
+// an arche kernel is ordinary imperative code — nested `for` loops and `if` — not just column math.
+#import { fmt }
+
+count_primes :: system eff {
+  c := 0;
+  for (i := 2; i < 100; i = i + 1) {
+    p := 1;
+    for (j := 2; j * j <= i; j = j + 1) {
+      if (i % j == 0) {
+        p = 0;
+      }
+    }
+    c = c + p;
+  }
+  fmt.printf("primes<100: %d\n", c);
+}
+
+#run seq({ count_primes })

@@ -1,0 +1,12 @@
+{
+  "name": "arche-wasm",
+  "version": "0.1.0",
+  "private": true,
+  "description": "arche compute programs compiled to WebAssembly (wasm32-wasi) and run in the browser, with Playwright e2e tests",
+  "scripts": {
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.48.0"
+  }
+}

@@ -1,0 +1,22 @@
+// Columnar ETL in the whole-column idiom: an array-literal scatter seeds per-row price/quantity, a
+// whole-column expression derives `revenue = price * qty` across all rows at once, and `reduce(+, …)`
+// folds it to a checksum. The shape of a real analytics pass (like the design_analysis ETL benchmarks),
+// minus the CSV load. price/qty/revenue are distinct component types that collapse to their float
+// backing in the whole-column ops.
+#import { fmt }
+
+price   :: float;
+qty     :: float;
+revenue :: float;
+Txn :: arche { price, qty, revenue }
+[4]Txn(4);
+
+run :: system eff {
+  Txn.price = { 10.0, 20.0, 5.0, 8.0 };
+  Txn.qty = { 3.0, 1.0, 10.0, 2.0 };
+  Txn.revenue = Txn.price * Txn.qty; // 30 + 20 + 50 + 16
+  total := reduce(+, Txn.revenue);
+  fmt.printf("revenue_total=%.1f\n", total);
+}
+
+#run seq({ run })

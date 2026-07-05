@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>arche → WebAssembly</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body { font: 15px/1.5 system-ui, sans-serif; max-width: 46rem; margin: 2rem auto; padding: 0 1rem; }
+    h1 { font-size: 1.4rem; margin-bottom: .25rem; }
+    p.lead { color: #666; margin-top: 0; }
+    .row { display: flex; gap: .5rem; align-items: center; margin: 1rem 0; }
+    select, button { font: inherit; padding: .4rem .6rem; }
+    button { cursor: pointer; }
+    pre { background: #1113; border: 1px solid #8884; border-radius: 6px; padding: .8rem 1rem;
+          min-height: 3rem; white-space: pre-wrap; margin: 0; }
+    pre[data-status="running"] { opacity: .5; }
+    pre[data-status="error"] { border-color: #d33; }
+    .hint { color: #888; font-size: .85rem; }
+  </style>
+</head>
+<body>
+  <h1>arche, compiled to WebAssembly</h1>
+  <p class="lead">These <a href="https://github.com/">arche</a> compute programs were built with
+    <code>arche build --arch=wasm32</code> and run right here in your browser via a tiny WASI shim.
+    Pick one and run it — its <code>fmt</code> output appears below.</p>
+
+  <div class="row">
+    <label for="demo">Demo:</label>
+    <select id="demo">
+      <option value="reduce">reduce — data-parallel column sum</option>
+      <option value="pipeline">pipeline — columnar ETL (price × qty → reduce)</option>
+      <option value="primes">primes — a trial-division sieve loop</option>
+    </select>
+    <button id="run">Run</button>
+  </div>
+
+  <pre id="out" data-status="idle"></pre>
+  <p class="hint">Output is captured from the module's <code>fd_write</code> (stdout) — no server round-trip;
+    the arche program executes entirely in the page's WebAssembly sandbox.</p>
+
+  <script src="wasi.js"></script>
+  <script src="main.js"></script>
+</body>
+</html>
