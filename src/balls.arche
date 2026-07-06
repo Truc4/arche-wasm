@@ -1,0 +1,69 @@
+// A minimal animated gfx demo: filled discs bouncing inside the window, rendered by arche into its own
+// software framebuffer and blitted to the surface by the gfx backend. The SAME program runs natively (an
+// X11/Wayland window, or headless PPM dump) and in the browser (wasm reactor → <canvas>) — only the gfx
+// backend differs. Movement is branch-free (`select`, the map idiom): flip a velocity component when the
+// next step would leave the [r, dim-r] band, then advance.
+#import { gfx os }
+
+W :: 480;
+H :: 360;
+
+pos(x, y) :: int;
+vel(x, y) :: int;
+color :: int;
+r :: int;
+handle :: window;
+bg :: int;
+
+Ball :: arche { pos, vel, color, r }
+Window :: arche { handle, bg }
+// The framebuffer is ONE buffer entity the driver owns: a [W*H]int array of 0xRRGGBB pixels. gfx queries
+// `{ framebuffer }` source-agnostically, so its shape/size live here, not in the device.
+Framebuffer :: arche { framebuffer :: [W * H]int }
+
+[7]Ball(7);
+[1]Window ?abort;
+[1]Framebuffer(1);
+[1]Closed;
+
+boot :: system eff {
+  gfx.open(W, H, "arche-wasm balls")(win:);
+  insert(Window { handle: win, bg: 0x0b0f1a });
+}
+
+seed :: map (query { pos, vel, color, r } as e)(pos, vel, color, r) {
+  rr := 16 + (e.id % 3) * 10;
+  sx := (e.id % 2) * 2 - 1;
+  sy := ((e.id / 2) % 2) * 2 - 1;
+  r     = r(rr);
+  pos.x = rr + (e.id * 91) % (W - 2 * rr);
+  pos.y = rr + (e.id * 57) % (H - 2 * rr);
+  vel.x = sx * (2 + e.id % 3);
+  vel.y = sy * (2 + e.id % 2);
+  color = color(0x2299ff + (e.id % 5) * 0x0a1420);
+}
+
+step :: map (query { pos, vel, r })(pos, vel) {
+  nx := pos.x + vel.x;
+  ny := pos.y + vel.y;
+  vel.x = select(nx < r || nx > W - r, -vel.x, vel.x);
+  vel.y = select(ny < r || ny > H - r, -vel.y, vel.y);
+  pos.x = pos.x + vel.x;
+  pos.y = pos.y + vel.y;
+}
+
+// Native: gfx.poll inserts a Closed row when the window/frame-budget ends → exit. In the browser reactor
+// gfx.poll is a no-op (the tab is always open), so this never fires — harmless.
+done :: map (Closed) eff {
+  os.exit(0)(_:);
+}
+
+#run {
+  seq(
+    {
+      boot,
+      seed,
+      forever(seq({ step, gfx.clear, gfx.circle, gfx.present, gfx.poll, done })),
+    },
+  )
+}

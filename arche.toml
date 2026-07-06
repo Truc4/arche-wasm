@@ -1,0 +1,11 @@
+# arche-wasm — imports the arche repo's `gfx` device + stdlib (like arche-rpg).
+# `[lib] paths` add those as module-search roots so the gfx demo can `#import { gfx }`.
+# (Adjust if you cloned arche somewhere other than ../arche.)
+[lib]
+paths = ["../arche/extras", "../arche/stdlib"]
+
+# gfx backend: "wasm" = a shim-less variant whose gfx_be_* become wasm imports the browser host
+# fulfils (it blits the framebuffer to a <canvas>). Override for a native window/headless run, e.g.
+# ARCHE_SELECT=gfx=headless (PPM dump) or ARCHE_SELECT=gfx=x11.
+[select]
+gfx = "wasm"
