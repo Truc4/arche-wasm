@@ -17,7 +17,7 @@ const wwwDir = path.resolve(__dirname, '..', '..', 'www');
 for (const [name, expected] of Object.entries(DEMOS)) {
   test(`${name} runs in the browser and prints ${JSON.stringify(expected)}`, async ({ page }) => {
     test.skip(!fs.existsSync(path.join(wwwDir, `${name}.wasm`)), 'wasm not built (WASI sysroot missing?)');
-    await page.goto('/index.html');
+    await page.goto('/demos.html');
     await page.selectOption('#demo', name);
     await page.click('#run');
     const out = page.locator('#out');

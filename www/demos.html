@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>arche → WebAssembly (demos)</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body { font: 15px/1.5 system-ui, sans-serif; max-width: 46rem; margin: 2rem auto; padding: 0 1rem; }
+    h1 { font-size: 1.4rem; margin-bottom: .25rem; }
+    p.lead { color: #666; margin-top: 0; }
+    .row { display: flex; gap: .5rem; align-items: center; margin: 1rem 0; }
+    select, button { font: inherit; padding: .4rem .6rem; }
+    button { cursor: pointer; }
+    pre { background: #1113; border: 1px solid #8884; border-radius: 6px; padding: .8rem 1rem;
+          min-height: 3rem; white-space: pre-wrap; margin: 0; }
+    pre[data-status="running"] { opacity: .5; }
+    pre[data-status="error"] { border-color: #d33; }
+    .hint { color: #888; font-size: .85rem; }
+    canvas { border: 1px solid #8884; border-radius: 6px; image-rendering: pixelated;
+             max-width: 100%; background: #0b0f1a; }
+  </style>
+</head>
+<body>
+  <h1>arche → WebAssembly — demo gallery</h1>
+  <p class="lead">A test-only gallery of the sample <code>arche build --arch=wasm32</code> programs. The
+    public site is <a href="index.html">the app itself</a>, full-screen; this page just makes each sample
+    selectable so the end-to-end tests can drive it.</p>
+
+  <div class="row">
+    <label for="demo">Demo:</label>
+    <select id="demo">
+      <option value="reduce">reduce — data-parallel column sum</option>
+      <option value="pipeline">pipeline — columnar ETL (price × qty → reduce)</option>
+      <option value="primes">primes — a trial-division sieve loop</option>
+      <option value="balls" data-kind="gfx">balls — gfx: bouncing discs → &lt;canvas&gt;</option>
+    </select>
+    <button id="run">Run</button>
+  </div>
+
+  <pre id="out" data-status="idle"></pre>
+  <canvas id="screen" data-status="idle" style="display:none"></canvas>
+  <p class="hint">Compute demos render their <code>fd_write</code> (stdout) above. The <code>balls</code> demo is
+    a gfx (Tier&nbsp;1) module: arche renders into its own software framebuffer, driven by
+    <code>requestAnimationFrame</code> and presented to the GPU (WebGL) — no server round-trip; the world
+    runs entirely in the page's WebAssembly sandbox.</p>
+
+  <script src="wasi.js"></script>
+  <script src="gfx.js"></script>
+  <script src="demos.js"></script>
+</body>
+</html>
