@@ -5,7 +5,7 @@
 
 (async function () {
   const screen = document.getElementById("screen");
-  const APP = "balls"; // the arche gfx program: src/<APP>.arche → www/<APP>.wasm
+  const APP = "square"; // the arche gfx program: src/<APP>.arche → www/<APP>.wasm
   try {
     const resp = await fetch("./" + APP + ".wasm");
     if (!resp.ok) throw new Error("could not fetch " + APP + ".wasm (" + resp.status + ")");

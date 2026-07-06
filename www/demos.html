@@ -33,17 +33,17 @@
       <option value="reduce">reduce — data-parallel column sum</option>
       <option value="pipeline">pipeline — columnar ETL (price × qty → reduce)</option>
       <option value="primes">primes — a trial-division sieve loop</option>
-      <option value="balls" data-kind="gfx">balls — gfx: bouncing discs → &lt;canvas&gt;</option>
+      <option value="square" data-kind="gfx">square — gfx: a square you move with ← / → → &lt;canvas&gt;</option>
     </select>
     <button id="run">Run</button>
   </div>
 
   <pre id="out" data-status="idle"></pre>
   <canvas id="screen" data-status="idle" style="display:none"></canvas>
-  <p class="hint">Compute demos render their <code>fd_write</code> (stdout) above. The <code>balls</code> demo is
-    a gfx (Tier&nbsp;1) module: arche renders into its own software framebuffer, driven by
-    <code>requestAnimationFrame</code> and presented to the GPU (WebGL) — no server round-trip; the world
-    runs entirely in the page's WebAssembly sandbox.</p>
+  <p class="hint">Compute demos render their <code>fd_write</code> (stdout) above. The <code>square</code> demo
+    is a gfx (Tier&nbsp;1) module: arche renders into its own software framebuffer, driven by
+    <code>requestAnimationFrame</code> and presented to the GPU (WebGL), with ← / → keys fed back in — no
+    server round-trip; the world runs entirely in the page's WebAssembly sandbox.</p>
 
   <script src="wasi.js"></script>
   <script src="gfx.js"></script>

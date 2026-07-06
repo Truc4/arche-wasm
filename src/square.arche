@@ -1,0 +1,71 @@
+/// A minimal interactive gfx demo: a single square the player slides left and right with the ←/→ (or A/D)
+/// keys. arche renders it into its own software framebuffer; the gfx backend presents that surface — a
+/// native X11/Wayland window, or the browser's GPU-textured <canvas>. The SAME program runs natively and in
+/// the browser; only the gfx backend differs. Input is `gfx.axis_x`: -1 while left is held, +1 while right
+/// is held, 0 idle — folded into the square's x each frame and clamped to the window.
+#import { gfx os }
+
+W :: 480;
+H :: 360;
+SIZE :: 48;
+SPEED :: 6;
+
+rx :: int;
+ry :: int;
+rw :: int;
+rh :: int;
+rcolor :: int;
+handle :: window;
+bg :: int;
+
+Player :: arche { rx, ry, rw, rh, rcolor }
+Window :: arche { handle, bg }
+Framebuffer :: arche { framebuffer :: [W * H]int }
+
+[1]Player(1);
+[1]Window ?abort;
+[1]Framebuffer(1);
+[1]Closed;
+
+boot :: system eff {
+  gfx.open(W, H, "arche-wasm square")(win:);
+  insert(Window { handle: win, bg: 0x0b0f1a });
+}
+
+seed :: map (query { rx, ry, rw, rh, rcolor })(rx, ry, rw, rh, rcolor) {
+  rw = rw(SIZE);
+  rh = rh(SIZE);
+  rx = rx(W / 2 - SIZE / 2);
+  ry = ry(H - SIZE - 24);
+  rcolor = rcolor(0x2299ff);
+}
+
+slide :: system eff {
+  map (query { handle }) eff {
+    gfx.axis_x(handle)(dx:);
+    map (query { rx, rw })(rx) eff {
+      nx := rx + dx * SPEED;
+      if (nx < 0) {
+        nx = 0;
+      }
+      if (nx > W - rw) {
+        nx = W - rw;
+      }
+      rx = nx;
+    };
+  };
+}
+
+done :: map (Closed) eff {
+  os.exit(0)(_:);
+}
+
+#run {
+  seq(
+    {
+      boot,
+      seed,
+      forever(seq({ slide, gfx.clear, gfx.rect, gfx.present, gfx.poll, done })),
+    },
+  )
+}

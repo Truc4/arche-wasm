@@ -62,6 +62,23 @@
       this.memory = null;
       this._raf = 0;
       this._stopped = false;
+      this.keys = { left: false, right: false }; // ←/→ (or A/D) held state, read by gfx_be_axis_x
+      this._kd = null;
+      this._ku = null;
+    }
+
+    // Track the horizontal movement keys. Called from start(); torn down in stop(). preventDefault keeps the
+    // arrow keys from scrolling the page.
+    _bindKeys() {
+      const set = (down) => (e) => {
+        const k = e.key;
+        if (k === "ArrowLeft" || k === "a" || k === "A") { this.keys.left = down; e.preventDefault(); }
+        else if (k === "ArrowRight" || k === "d" || k === "D") { this.keys.right = down; e.preventDefault(); }
+      };
+      this._kd = set(true);
+      this._ku = set(false);
+      window.addEventListener("keydown", this._kd);
+      window.addEventListener("keyup", this._ku);
     }
 
     // Build the shader program, the fullscreen-quad vertex buffer, and the framebuffer texture. Called once
@@ -128,12 +145,14 @@
           if (self.frames === 1) self.canvas.dataset.status = "live"; // first painted frame (e2e signal)
         },
         gfx_be_poll() { return 1; },   // the tab is always "open"; native inserts Closed here to exit
+        gfx_be_axis_x() { return (self.keys.right ? 1 : 0) - (self.keys.left ? 1 : 0); },
         gfx_be_close() { },
       };
     }
 
     async start(bytes) {
       this.canvas.dataset.status = "running";
+      this._bindKeys();
       const importObj = Object.assign({}, this.wasi.imports, { env: this.gfxImports });
       const { instance } = await WebAssembly.instantiate(bytes, importObj);
       this.instance = instance;
@@ -153,6 +172,9 @@
       this._stopped = true;
       if (this._raf) cancelAnimationFrame(this._raf);
       this._raf = 0;
+      if (this._kd) window.removeEventListener("keydown", this._kd);
+      if (this._ku) window.removeEventListener("keyup", this._ku);
+      this._kd = this._ku = null;
     }
   }
 
