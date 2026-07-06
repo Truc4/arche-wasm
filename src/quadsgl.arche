@@ -1,0 +1,86 @@
+// Tier 2 GPU slice 1: arche drives a GPU instanced-quad render. arche owns the instance buffer — a [1]
+// singleton whose columns (xs, ys, sz, col) are N-wide flat arrays — runs the per-frame physics over it,
+// and hands those columns straight to `gl_draw` as []-slices (the same way Tier 1 hands the framebuffer to
+// gfx_be_present). The browser host uploads each column as a per-instance vertex attribute and draws all N
+// quads in ONE instanced WebGL2 draw call. The pool columns ARE the GPU instance buffer.
+//
+// Self-contained: a plain int window handle (no gfx device), so `#import` is empty; the two host functions
+// are declared #foreign and become wasm imports (Tier 1's --allow-undefined). The blocking `#run …forever`
+// is auto-split into the arche_run/arche_frame reactor the browser drives with requestAnimationFrame.
+
+W  :: 480;
+H  :: 360;
+WF :: 480.0;
+HF :: 360.0;
+N  :: 48;
+
+// The instance buffer: one flat [N] column per attribute (position, velocity, size, colour). SoA — exactly
+// the layout a GPU wants, one VBO per column.
+Scene :: arche {
+  xs  :: [N]float,
+  ys  :: [N]float,
+  vx  :: [N]float,
+  vy  :: [N]float,
+  sz  :: [N]float,
+  col :: [N]int,
+}
+
+[1]Scene(1);
+
+#foreign {
+  // Set up the WebGL2 context + instanced-quad program on the canvas. Returns an int handle (unused here).
+  gl_open :: proc(w: int, h: int)(win: int);
+  // Draw N instanced quads from the four instance columns (centre x, centre y, half-size, 0xRRGGBB colour).
+  // The slices are in-out (the FFI-borrowed-slice idiom); gl_draw only reads them.
+  gl_draw :: proc(xs: []float, ys: []float, ss: []float, cols: []int, n: int)(xs: []float, ys: []float, ss: []float, cols: []int);
+}
+
+boot :: system eff {
+  gl_open(W, H)(_:);
+}
+
+seed :: system (query { xs, ys, vx, vy, sz, col })(xs, ys, vx, vy, sz, col) eff {
+  i := 0;
+  for (; i < N;) {
+    sgnx := float((i % 2) * 2 - 1);
+    sgny := float(((i / 2) % 2) * 2 - 1);
+    xs[i]  = 40.0 + float((i * 97) % 400);
+    ys[i]  = 40.0 + float((i * 53) % 280);
+    vx[i]  = sgnx * float(2 + i % 3);
+    vy[i]  = sgny * float(2 + i % 2);
+    sz[i]  = 12.0 + float(i % 4) * 8.0;
+    col[i] = 0x3399ff + (i % 6) * 0x0a1830;
+    i = i + 1;
+  }
+}
+
+step :: system (query { xs, ys, vx, vy, sz })(xs, ys, vx, vy) eff {
+  i := 0;
+  for (; i < N;) {
+    nx := xs[i] + vx[i];
+    ny := ys[i] + vy[i];
+    if (nx < sz[i] || nx > WF - sz[i]) {
+      vx[i] = -vx[i];
+    }
+    if (ny < sz[i] || ny > HF - sz[i]) {
+      vy[i] = -vy[i];
+    }
+    xs[i] = xs[i] + vx[i];
+    ys[i] = ys[i] + vy[i];
+    i = i + 1;
+  }
+}
+
+draw :: system (query { xs, ys, sz, col }) eff {
+  gl_draw(xs, ys, sz, col, N)(_:, _:, _:, _:);
+}
+
+#run {
+  seq(
+    {
+      boot,
+      seed,
+      forever(seq({ step, draw })),
+    },
+  )
+}
