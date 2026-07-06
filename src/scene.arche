@@ -1,0 +1,93 @@
+/// First-pass side-scroller proving the `camera` device: a world of solid-colour scenery (a ground band,
+/// blocky hills, bushes) in float WORLD coordinates, drawn through `camera.to_screen` to screen pixels for
+/// `gfx.rect`. Press ←/→ to pan the camera — the whole world scrolls, which is the "the camera works"
+/// signal. Everything is one `Prop` pool so a single projection pass covers it. See docs/scenery.md for the
+/// art direction and roadmap (round shapes, a follow-cam on the player, parallax, slopes come next).
+#import { gfx camera vec os }
+
+W :: 480;
+H :: 360;
+PAN :: 5.0;
+
+/// Viewport centre in pixels — where the camera's eye lands on screen.
+CENTRE(x, y) :: (240.0, 180.0);
+
+/// Palette — the whole look lives here; swap these to re-theme everything (see docs/scenery.md).
+SKY    :: 0x8ecfe8;
+GROUND :: 0x6ab04c;
+HILL   :: 0x4a9e3f;
+BUSH   :: 0x2f7d33;
+MARK   :: 0xe8503a;
+
+rw     :: int;
+rh     :: int;
+rcolor :: int;
+rx     :: int;
+ry     :: int;
+handle :: window;
+bg     :: int;
+
+/// A solid-colour rectangle in world space: `pos` (world centre), `rw`/`rh` (pixel size), `rcolor`, and the
+/// projected screen top-left `rx`/`ry` that `gfx.rect` draws.
+Prop :: arche { pos, rw, rh, rcolor, rx, ry }
+Window :: arche { handle, bg }
+Framebuffer :: arche { framebuffer :: [W * H]int }
+
+[8]Prop(7);
+[1]Window ?abort;
+[1]Framebuffer(1);
+[1]Camera(1);
+[1]Closed;
+
+boot :: system eff {
+  gfx.open(W, H, "arche-wasm scene")(win:);
+  insert(Window { handle: win, bg: SKY });
+}
+
+seed :: system {
+  Prop.pos.x  = { 600.0, 150.0, 520.0, 950.0, 330.0, 760.0, 600.0 };
+  Prop.pos.y  = { 360.0, 300.0, 290.0, 300.0, 330.0, 335.0, 250.0 };
+  Prop.rw     = { 2400, 200, 260, 220, 70, 80, 40 };
+  Prop.rh     = { 120, 120, 160, 130, 60, 55, 56 };
+  Prop.rcolor = { GROUND, HILL, HILL, HILL, BUSH, BUSH, MARK };
+
+  Camera.eye.x = { 600.0 };
+  Camera.eye.y = { 240.0 };
+  Camera.zoom  = { 1.0 };
+}
+
+/// Pan the camera left/right with the input axis (the eye is the camera's own inner-fan column, so its
+/// field write sticks).
+pan :: system eff {
+  map (query { handle }) eff {
+    gfx.axis_x(handle)(dx:);
+    map (query { eye, zoom })(eye) eff {
+      eye.x = eye.x + float(dx) * PAN;
+    };
+  };
+}
+
+/// Project every prop from world to screen pixels for `gfx.rect`.
+project :: system eff {
+  map (query { eye, zoom }) eff {
+    map (query { pos, rw, rh, rx, ry })(rx, ry) eff {
+      s := camera.to_screen(pos, eye, zoom, CENTRE);
+      rx = i32(s.x) - rw / 2;
+      ry = i32(s.y) - rh / 2;
+    };
+  };
+}
+
+done :: map (Closed) eff {
+  os.exit(0)(_:);
+}
+
+#run {
+  seq(
+    {
+      boot,
+      seed,
+      forever(seq({ pan, project, gfx.clear, gfx.rect, gfx.present, gfx.poll, done })),
+    },
+  )
+}
