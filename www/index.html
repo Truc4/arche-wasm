@@ -5,11 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>arche</title>
   <style>
-    /* The page IS the app: one full-viewport canvas, no chrome. The canvas backing store is the wasm
-       program's native resolution; object-fit:contain letterboxes it into the viewport (pure CSS, scales
-       up or down, preserves aspect), and pixelated keeps it crisp when magnified. */
-    html, body { margin: 0; height: 100%; background: #0b0f1a; overflow: hidden; }
-    #screen { display: block; width: 100vw; height: 100vh; object-fit: contain; image-rendering: pixelated; }
+    /* The page IS the app: one full-viewport canvas, no chrome. The canvas fills the whole window and its
+       backing store is sized by the host (gfx.js) to the window's aspect — fixed render HEIGHT, dynamic
+       WIDTH — so the image exactly fits with no bars on any side and no distortion; widening the window
+       reveals more world rather than stretching. It re-sizes live on window resize. */
+    html, body { margin: 0; height: 100%; background: #12131c; overflow: hidden; }
+    #screen { display: block; width: 100vw; height: 100vh; }
   </style>
 </head>
 <body>

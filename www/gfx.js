@@ -43,6 +43,11 @@
     return s;
   }
 
+  // Largest render width we'll ask the wasm to fill. The arche program's framebuffer is a fixed-size array
+  // sized to MAXW×(render height); we render only the live w×h sub-region into it, so w must never exceed
+  // this. MUST match `MAXW` in src/scene.arche. 4096 covers wider-than-32:9 at a 1080 render height.
+  const MAXW = 4096;
+
   class GfxRunner {
     constructor(canvas) {
       this.canvas = canvas;
@@ -53,11 +58,14 @@
       });
       if (!this.gl) throw new Error("WebGL is not available");
       this.wasi = new WasiShim(["gfx"]); // WASI imports + memory plumbing
-      this.w = 0;
-      this.h = 0;
+      this.w = 0;           // current render width — tracks the window aspect (gfx_be_w reports it)
+      this.h = 0;           // render height — fixed, from the wasm's requested H (gfx_be_h reports it)
+      this.renderH = 0;
+      this.texW = 0;        // size the framebuffer texture is currently allocated at (realloc'd on resize)
+      this.texH = 0;
       this.handle = 1n;     // opaque window handle: arche `window` lowers to i64, so this crosses as BigInt
                             // (the arche side only stores/passes it back to gfx_be_w/h/present/poll)
-      this.tex = null;      // the framebuffer texture, (re)allocated to W×H on open
+      this.tex = null;      // the framebuffer texture, (re)allocated when the render size changes
       this.frames = 0;
       this.memory = null;
       this._raf = 0;
@@ -65,6 +73,23 @@
       this.keys = { left: false, right: false }; // ←/→ (or A/D) held state, read by gfx_be_axis_x
       this._kd = null;
       this._ku = null;
+      this._onResize = null;
+    }
+
+    // Size the canvas backing store to the window: fixed render height, width = height × window aspect
+    // (capped at MAXW). The CSS sizes the element to 100vw×100vh; because the backing aspect equals the
+    // window aspect, the image fills exactly — no bars, no distortion. Called on open and on every resize;
+    // the wasm reads the new width via gfx_be_w next frame and renders a wider/narrower slice of the world.
+    _sizeToWindow() {
+      const ch = Math.max(1, window.innerHeight);
+      let w = Math.round(this.renderH * window.innerWidth / ch);
+      if (w < 1) w = 1;
+      if (w > MAXW) w = MAXW;
+      if (w === this.w && this.canvas.height === this.renderH) return;
+      this.w = w;
+      this.h = this.renderH;
+      this.canvas.width = w;          // resizing the backing store; the texture is realloc'd in _present
+      this.canvas.height = this.renderH;
     }
 
     // Track the horizontal movement keys. Called from start(); torn down in stop(). preventDefault keeps the
@@ -103,8 +128,9 @@
       gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
       gl.uniform1i(gl.getUniformLocation(prog, "u_tex"), 0);
 
-      // W×H texture. NEAREST + CLAMP_TO_EDGE are valid for non-power-of-two sizes (480×360) and keep pixels
-      // crisp when the canvas is scaled up. Allocate storage now; texSubImage2D refills it each frame.
+      // The framebuffer texture. NEAREST + CLAMP_TO_EDGE are valid for the non-power-of-two, window-derived
+      // sizes we use and keep pixels crisp when the canvas is scaled up. Storage is (re)allocated in _present
+      // whenever the render size changes; the initial allocation here just gives it a valid size.
       this.tex = gl.createTexture();
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, this.tex);
@@ -116,13 +142,22 @@
       gl.viewport(0, 0, w, h);
     }
 
-    // Upload the [W*H]int framebuffer straight from wasm memory and draw it. Recompute the byte view each
-    // call: wasm memory can grow and detach its ArrayBuffer. No per-pixel JS — the GPU does the swizzle.
+    // Upload the live w×h region of the framebuffer straight from wasm memory and draw it. Recompute the
+    // byte view each call: wasm memory can grow and detach its ArrayBuffer. When the render size changed
+    // (window resize), reallocate the texture + viewport to match; otherwise refill in place. No per-pixel
+    // JS — the GPU does the swizzle.
     _present(pxPtr, w, h) {
       const gl = this.gl;
       const bytes = new Uint8Array(this.memory.buffer, pxPtr, w * h * 4);
       gl.bindTexture(gl.TEXTURE_2D, this.tex);
-      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, bytes);
+      if (w !== this.texW || h !== this.texH) {
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, bytes);
+        gl.viewport(0, 0, w, h);
+        this.texW = w;
+        this.texH = h;
+      } else {
+        gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, bytes);
+      }
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     }
 
@@ -138,12 +173,16 @@
           self.wasi.stderr += s;
           (level >= 3 ? console.error : level >= 2 ? console.warn : level >= 1 ? console.info : console.debug)(s);
         },
-        gfx_be_open(w, h, _titlePtr) {
-          self.w = w;
-          self.h = h;
-          self.canvas.width = w;
-          self.canvas.height = h;
-          self._initGL(w, h);
+        gfx_be_open(_w, h, _titlePtr) {
+          // `h` is the fixed render height (the wasm's requested H). The width is derived from the window
+          // aspect, not the wasm's requested width, so the render fills the window with no bars.
+          self.renderH = h;
+          self._sizeToWindow();
+          self._initGL(self.w, self.h);
+          if (!self._onResize) {
+            self._onResize = () => self._sizeToWindow();
+            window.addEventListener("resize", self._onResize);
+          }
           return self.handle;
         },
         gfx_be_w() { return self.w; },
@@ -183,7 +222,8 @@
       this._raf = 0;
       if (this._kd) window.removeEventListener("keydown", this._kd);
       if (this._ku) window.removeEventListener("keyup", this._ku);
-      this._kd = this._ku = null;
+      if (this._onResize) window.removeEventListener("resize", this._onResize);
+      this._kd = this._ku = this._onResize = null;
     }
   }
 

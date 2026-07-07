@@ -12,10 +12,14 @@
 /// misbehaves (dropped, or broadcast across pools), so the shapes are kept fully separate. See docs/scenery.md.
 #import { gfx camera vec os }
 
-// Rendered at 1080p (16:9). The whole scene is authored in pixel units at zoom 1, so every length/position
-// below is 3× the old 480×360 layout (screen y = world y − 180 here; the floor top sits at screen 960).
-W :: 1920;
-H :: 1080;
+// RESOLUTION: the render HEIGHT is fixed at H=1080 (a 1080p-tall image); the render WIDTH is dynamic — the
+// host (gfx.js) sizes it to the window aspect each frame and reports it via `gfx.dims`. So the scene fills
+// any window with no bars, and a wider window shows MORE world. The framebuffer is a fixed array sized to
+// MAXW×H (the largest width we'll render); the live w×H region is written with row stride = the runtime w.
+// The whole scene is authored in pixel units at zoom 1 (screen y = world y − 180; floor top at screen 960).
+H    :: 1080;        // fixed render height
+MAXW :: 4096;        // framebuffer capacity (max render width) — MUST match MAXW in www/gfx.js
+W    :: 1920;        // nominal width passed to gfx.open (the host overrides it with the window's width)
 SPEED    :: 9.0;     // player world-units moved per frame while a key is held
 DEADZONE :: 420.0;   // half-width (world units) the player roams before the camera scrolls to follow it
 EYE0     :: 2100.0;  // the home eye x (= initial player x); parallax pivots here so home positions are exact
@@ -23,9 +27,6 @@ PAR_HILL :: 0.5;     // hills' parallax factor (background; scrolls at half the 
 PLAYER_Y :: 1089.0;  // player world y (centre): PW×PW square standing with its base on the floor line
                      // (floor top at screen 960 is world y 1140).
 PW :: 102;           // player size (px) — square
-
-/// Viewport centre in pixels — where the camera's eye lands on screen.
-CENTRE(x, y) :: (960.0, 540.0);
 
 /// Palette — one clean, ABSTRACT system: a thin floor, a cool indigo value-ramp of building shades
 /// (`S1` darkest/furthest … `S6` lightest/nearest), dark distant hills, soft light clouds, and a single
@@ -78,7 +79,7 @@ Round :: arche { cpx, cpy, crad, ccol, cplx, csx, csy }
 /// The player — its own world x `ppx`, screen top-left `prx`/`pry`; size/colour are the PW/PLAYER consts.
 Player :: arche { ppx, prx, pry }
 Window :: arche { handle, bg }
-Framebuffer :: arche { framebuffer :: [W * H]int }
+Framebuffer :: arche { framebuffer :: [MAXW * H]int }
 
 [8]Prop(7);
 [6]Hill(3);
@@ -158,145 +159,166 @@ follow :: system eff {
 /// `(eye − EYE0)·(1 − plx)` before `camera.to_screen`, so a plx<1 layer scrolls slower than the foreground
 /// while its home position (at eye = EYE0) is unchanged.
 project :: system eff {
-  map (query { eye, zoom }) eff {
-    map (query { pos, rw, rh, plx, rx, ry })(rx, ry) eff {
-      wx := pos.x + (eye.x - EYE0) * (1.0 - plx);
-      s := camera.to_screen(vec.mk(wx, pos.y), eye, zoom, CENTRE);
-      rx = i32(s.x) - rw / 2;
-      ry = i32(s.y) - rh / 2;
+  map (query { handle }) eff {
+    gfx.dims(handle)(vw:, vh:);
+    map (query { eye, zoom }) eff {
+      map (query { pos, rw, rh, plx, rx, ry })(rx, ry) eff {
+        wx := pos.x + (eye.x - EYE0) * (1.0 - plx);
+        s := camera.to_screen(vec.mk(wx, pos.y), eye, zoom, vec.mk(float(vw) * 0.5, float(vh) * 0.5));
+        rx = i32(s.x) - rw / 2;
+        ry = i32(s.y) - rh / 2;
+      };
     };
   };
 }
 
 /// Project the hills' base-centres to screen (parallax PAR_HILL).
 project_hill :: system eff {
-  map (query { eye, zoom }) eff {
-    map (query { hpx, hpy, hsx, hsy })(hsx, hsy) eff {
-      wx := hpx + (eye.x - EYE0) * (1.0 - PAR_HILL);
-      s := camera.to_screen(vec.mk(wx, hpy), eye, zoom, CENTRE);
-      hsx = i32(s.x);
-      hsy = i32(s.y);
+  map (query { handle }) eff {
+    gfx.dims(handle)(vw:, vh:);
+    map (query { eye, zoom }) eff {
+      map (query { hpx, hpy, hsx, hsy })(hsx, hsy) eff {
+        wx := hpx + (eye.x - EYE0) * (1.0 - PAR_HILL);
+        s := camera.to_screen(vec.mk(wx, hpy), eye, zoom, vec.mk(float(vw) * 0.5, float(vh) * 0.5));
+        hsx = i32(s.x);
+        hsy = i32(s.y);
+      };
     };
   };
 }
 
 /// Project the round shapes' (clouds/bushes) centres to screen (per-entity parallax `cplx`).
 project_round :: system eff {
-  map (query { eye, zoom }) eff {
-    map (query { cpx, cpy, cplx, csx, csy })(csx, csy) eff {
-      wx := cpx + (eye.x - EYE0) * (1.0 - cplx);
-      s := camera.to_screen(vec.mk(wx, cpy), eye, zoom, CENTRE);
-      csx = i32(s.x);
-      csy = i32(s.y);
+  map (query { handle }) eff {
+    gfx.dims(handle)(vw:, vh:);
+    map (query { eye, zoom }) eff {
+      map (query { cpx, cpy, cplx, csx, csy })(csx, csy) eff {
+        wx := cpx + (eye.x - EYE0) * (1.0 - cplx);
+        s := camera.to_screen(vec.mk(wx, cpy), eye, zoom, vec.mk(float(vw) * 0.5, float(vh) * 0.5));
+        csx = i32(s.x);
+        csy = i32(s.y);
+      };
     };
   };
 }
 
 /// Project the player from its (ppx, PLAYER_Y) world point to its own screen top-left `prx`/`pry` (plx = 1).
 project_player :: system eff {
-  map (query { eye, zoom }) eff {
-    map (query { ppx, prx, pry })(prx, pry) eff {
-      s := camera.to_screen(vec.mk(ppx, PLAYER_Y), eye, zoom, CENTRE);
-      prx = i32(s.x) - PW / 2;
-      pry = i32(s.y) - PW / 2;
+  map (query { handle }) eff {
+    gfx.dims(handle)(vw:, vh:);
+    map (query { eye, zoom }) eff {
+      map (query { ppx, prx, pry })(prx, pry) eff {
+        s := camera.to_screen(vec.mk(ppx, PLAYER_Y), eye, zoom, vec.mk(float(vw) * 0.5, float(vh) * 0.5));
+        prx = i32(s.x) - PW / 2;
+        pry = i32(s.y) - PW / 2;
+      };
     };
   };
 }
 
 /// Draw the hills: filled flat-bottom triangles, apex up, base on the floor line. Behind the buildings.
 draw_hills :: system (query { framebuffer })(framebuffer) eff {
-  map (query { hsx, hsy, hhw, hht, hcol }) eff {
-    apex := hsy - hht;
-    yy := apex;
-    if (yy < 0) {
-      yy = 0;
-    }
-    ybase := hsy;
-    if (ybase > H) {
-      ybase = H;
-    }
-    for (; yy < ybase;) {
-      half := hhw * (yy - apex) / hht;   // 0 at apex → hhw at base
-      x0 := hsx - half;
-      x1 := hsx + half;
-      if (x0 < 0) {
-        x0 = 0;
+  map (query { handle }) eff {
+    gfx.dims(handle)(vw:, vh:);
+    map (query { hsx, hsy, hhw, hht, hcol }) eff {
+      apex := hsy - hht;
+      yy := apex;
+      if (yy < 0) {
+        yy = 0;
       }
-      if (x1 > W) {
-        x1 = W;
+      ybase := hsy;
+      if (ybase > vh) {
+        ybase = vh;
       }
-      xx := x0;
-      for (; xx < x1;) {
-        framebuffer[yy * W + xx] = hcol;
-        xx = xx + 1;
+      for (; yy < ybase;) {
+        half := hhw * (yy - apex) / hht;   // 0 at apex → hhw at base
+        x0 := hsx - half;
+        x1 := hsx + half;
+        if (x0 < 0) {
+          x0 = 0;
+        }
+        if (x1 > vw) {
+          x1 = vw;
+        }
+        xx := x0;
+        for (; xx < x1;) {
+          framebuffer[yy * vw + xx] = hcol;
+          xx = xx + 1;
+        }
+        yy = yy + 1;
       }
-      yy = yy + 1;
-    }
+    };
   };
 }
 
 /// Draw the round shapes: filled circles (clouds and bushes), clamped to the window.
 draw_round :: system (query { framebuffer })(framebuffer) eff {
-  map (query { csx, csy, crad, ccol }) eff {
-    r2 := crad * crad;
-    yy := csy - crad;
-    ylim := csy + crad + 1;
-    if (yy < 0) {
-      yy = 0;
-    }
-    if (ylim > H) {
-      ylim = H;
-    }
-    for (; yy < ylim;) {
-      xx := csx - crad;
-      xlim := csx + crad + 1;
-      if (xx < 0) {
-        xx = 0;
+  map (query { handle }) eff {
+    gfx.dims(handle)(vw:, vh:);
+    map (query { csx, csy, crad, ccol }) eff {
+      r2 := crad * crad;
+      yy := csy - crad;
+      ylim := csy + crad + 1;
+      if (yy < 0) {
+        yy = 0;
       }
-      if (xlim > W) {
-        xlim = W;
+      if (ylim > vh) {
+        ylim = vh;
       }
-      for (; xx < xlim;) {
-        dx := xx - csx;
-        dy := yy - csy;
-        if (dx * dx + dy * dy <= r2) {
-          framebuffer[yy * W + xx] = ccol;
+      for (; yy < ylim;) {
+        xx := csx - crad;
+        xlim := csx + crad + 1;
+        if (xx < 0) {
+          xx = 0;
         }
-        xx = xx + 1;
+        if (xlim > vw) {
+          xlim = vw;
+        }
+        for (; xx < xlim;) {
+          dx := xx - csx;
+          dy := yy - csy;
+          if (dx * dx + dy * dy <= r2) {
+            framebuffer[yy * vw + xx] = ccol;
+          }
+          xx = xx + 1;
+        }
+        yy = yy + 1;
       }
-      yy = yy + 1;
-    }
+    };
   };
 }
 
 /// Draw the player square (PW×PW in `PLAYER`) into the framebuffer, clamped to the window; on top.
 draw_player :: system (query { framebuffer })(framebuffer) eff {
-  map (query { prx, pry }) eff {
-    y0 := pry;
-    y1 := pry + PW;
-    if (y0 < 0) {
-      y0 = 0;
-    }
-    if (y1 > H) {
-      y1 = H;
-    }
-    x0 := prx;
-    x1 := prx + PW;
-    if (x0 < 0) {
-      x0 = 0;
-    }
-    if (x1 > W) {
-      x1 = W;
-    }
-    yy := y0;
-    for (; yy < y1;) {
-      xx := x0;
-      for (; xx < x1;) {
-        framebuffer[yy * W + xx] = PLAYER;
-        xx = xx + 1;
+  map (query { handle }) eff {
+    gfx.dims(handle)(vw:, vh:);
+    map (query { prx, pry }) eff {
+      y0 := pry;
+      y1 := pry + PW;
+      if (y0 < 0) {
+        y0 = 0;
       }
-      yy = yy + 1;
-    }
+      if (y1 > vh) {
+        y1 = vh;
+      }
+      x0 := prx;
+      x1 := prx + PW;
+      if (x0 < 0) {
+        x0 = 0;
+      }
+      if (x1 > vw) {
+        x1 = vw;
+      }
+      yy := y0;
+      for (; yy < y1;) {
+        xx := x0;
+        for (; xx < x1;) {
+          framebuffer[yy * vw + xx] = PLAYER;
+          xx = xx + 1;
+        }
+        yy = yy + 1;
+      }
+    };
   };
 }
 
