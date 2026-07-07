@@ -9,6 +9,7 @@ paths = ["../arche/extras", "../arche/stdlib"]
 # ARCHE_SELECT=gfx=headless (PPM dump) or ARCHE_SELECT=gfx=x11.
 [select]
 gfx = "wasm"
-# text device: "framebuffer" blits a bitmap font into the shared framebuffer (on-screen everywhere — native
-# window, web canvas, headless). Switch to "dom" for the web-only <span> overlay (via www/text.js).
-text = "framebuffer"
+# text device: on the web we default to "dom" — real browser fonts as <span>s over the canvas (via
+# www/text.js), positioned at the driver's projected screen coords so they scroll with the world. The
+# native `make dev` path selects "framebuffer" instead (bitmap font into the shared framebuffer — no DOM).
+text = "dom"
