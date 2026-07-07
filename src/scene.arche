@@ -69,6 +69,17 @@ csx    :: int;     // round centre, screen
 csy    :: int;
 handle :: window;
 bg     :: int;
+// Text: a Sign is a WORLD-anchored label. The DRIVER owns all text logic — it projects the world anchor to
+// the screen run (tx,ty) each frame (like the buildings), then the selected `text` backend just DISPLAYS the
+// run. tx/ty/tsz/tcol/tlen/tstr are the display columns the text backend reads; twx/twy/tplx are driver-only.
+tx   :: int;        // projected screen top-left (read by the text backend)
+ty   :: int;
+tsz  :: int;        // text pixel height (backend scales the 8×8 glyphs to it)
+tcol :: int;        // 0xRRGGBB
+tlen :: int;        // live char count (tstr's [32]char type is declared inline on the Sign archetype)
+twx  :: float;      // world anchor (like a building's pos)
+twy  :: float;
+tplx :: float;      // parallax factor (1.0 = foreground, smaller = further/slower), like `plx`
 
 /// Solid-colour rectangle: `pos` world centre, `rw`/`rh` px size, `rcolor`, parallax `plx`, screen `rx`/`ry`.
 Prop :: arche { pos, rw, rh, rcolor, plx, rx, ry }
@@ -80,6 +91,10 @@ Round :: arche { cpx, cpy, crad, ccol, cplx, csx, csy }
 Player :: arche { ppx, prx, pry }
 Window :: arche { handle, bg }
 Framebuffer :: arche { framebuffer :: [MAXW * H]int }
+/// A world-anchored text label: world centre `twx`/`twy`, parallax `tplx`, its own projected screen run
+/// `tx`/`ty` + the text (`tstr`/`tlen`), size `tsz`, colour `tcol`. Its own archetype (writes only its own
+/// `tx`/`ty`), like every other drawable kind.
+Sign :: arche { twx, twy, tplx, tx, ty, tstr :: [32]char, tlen, tsz, tcol }
 
 [8]Prop(7);
 [6]Hill(3);
@@ -88,6 +103,7 @@ Framebuffer :: arche { framebuffer :: [MAXW * H]int }
 [1]Window ?abort;
 [1]Framebuffer(1);
 [1]Camera(1);
+[2]Sign ?abort;
 [1]Closed;
 
 boot :: system eff {
@@ -322,12 +338,28 @@ draw_player :: system (query { framebuffer })(framebuffer) eff {
   };
 }
 
-/// Draw the static HUD once via the `text` device (DOM backend): the host creates positioned <span>s over
-/// the canvas, which persist as the world scrolls beneath them. This runs in the arche_run PREFIX (before
-/// `forever`), so it fires exactly once. Coords are render pixels (H=1080); colours reuse the palette.
-draw_hud :: system eff {
-  text.draw(48, 60, "arche-wasm", 64, 0xffffff)();
-  text.draw(48, 132, "text device: DOM backend", 32, CLOUD)();
+/// Seed the world signs once (in the arche_run prefix). Each is placed at a WORLD anchor with a parallax
+/// depth; `tx`/`ty` are filled by `project_text` each frame. Uppercase A–Z only (the bitmap font's range).
+seed_text :: system eff {
+  insert(Sign { twx: 1500.0, twy: 480.0, tplx: 0.25, tstr: "ARCHE", tlen: 5, tsz: 96, tcol: 0xffffff, tx: 0, ty: 0 })(_:, _ok:);
+  insert(Sign { twx: 2900.0, twy: 900.0, tplx: 0.9,  tstr: "WASM",  tlen: 4, tsz: 64, tcol: CLOUD,     tx: 0, ty: 0 })(_:, _ok:);
+}
+
+/// Project each sign's world anchor to its screen run (`tx`/`ty`), with parallax — identical to `project`
+/// for the buildings — then centre it horizontally on the anchor by its run width (`tlen*tsz`). Writes only
+/// the sign's OWN `tx`/`ty` (single-archetype write). `text.render` then displays the run.
+project_text :: system eff {
+  map (query { handle }) eff {
+    gfx.dims(handle)(vw:, vh:);
+    map (query { eye, zoom }) eff {
+      map (query { twx, twy, tplx, tlen, tsz, tx, ty })(tx, ty) eff {
+        wx := twx + (eye.x - EYE0) * (1.0 - tplx);
+        s := camera.to_screen(vec.mk(wx, twy), eye, zoom, vec.mk(float(vw) * 0.5, float(vh) * 0.5));
+        tx = i32(s.x) - (tlen * tsz) / 2;
+        ty = i32(s.y);
+      };
+    };
+  };
 }
 
 done :: map (Closed) eff {
@@ -342,11 +374,11 @@ done :: map (Closed) eff {
     {
       boot,
       seed,
-      draw_hud,
+      seed_text,
       forever(seq({
         walk, follow,
-        project, project_hill, project_round, project_player,
-        gfx.clear, draw_hills, draw_round, gfx.rect, draw_player,
+        project, project_hill, project_round, project_player, project_text,
+        gfx.clear, draw_hills, draw_round, gfx.rect, draw_player, text.render,
         gfx.present, gfx.poll, done,
       })),
     },

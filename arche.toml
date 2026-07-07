@@ -9,5 +9,6 @@ paths = ["../arche/extras", "../arche/stdlib"]
 # ARCHE_SELECT=gfx=headless (PPM dump) or ARCHE_SELECT=gfx=x11.
 [select]
 gfx = "wasm"
-# text device: DOM backend — text.draw crosses to www/text.js, which renders <span>s over the canvas.
-text = "wasm"
+# text device: "framebuffer" blits a bitmap font into the shared framebuffer (on-screen everywhere — native
+# window, web canvas, headless). Switch to "dom" for the web-only <span> overlay (via www/text.js).
+text = "framebuffer"

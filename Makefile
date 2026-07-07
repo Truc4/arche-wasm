@@ -33,7 +33,7 @@ serve: wasm
 # hot-reload host: edit the source and it recompiles + reloads live. Uses a windowed gfx backend
 # (GFX=x11) instead of the wasm shim. Override the demo/backend: `make dev APP=square GFX=headless`.
 dev:
-	ARCHE_SELECT=gfx=$(GFX),text=terminal $(ARCHE) run src/$(APP).arche
+	ARCHE_SELECT=gfx=$(GFX),text=framebuffer $(ARCHE) run src/$(APP).arche
 
 # One-time: install the Playwright test runner + a headless Chromium.
 node_modules: package.json
