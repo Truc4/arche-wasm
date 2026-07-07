@@ -17,7 +17,8 @@
   class TextLayer {
     constructor() {
       this.layer = null;         // the #text-layer overlay div (created lazily on first draw)
-      this.spans = [];           // { x, y, size, el } in RENDER space, for resize reflow
+      this.spans = [];           // POOLED { x, y, size, text, el } in RENDER space; reused across frames
+      this._cursor = 0;          // per-frame reuse cursor: text_be_draw fills spans[0], [1], … in order
       this.memory = null;        // wasm linear memory (set by GfxRunner before arche_run)
       this.renderH = 0;          // gfx render height (set by GfxRunner in gfx_be_open)
       this._dec = new TextDecoder();
@@ -67,25 +68,36 @@
     get imports() {
       const self = this;
       return {
-        // text_be_draw(x, y, s, n, size, color): a []char lowers to (ptr, len) — here (sPtr, n). Decode the
-        // UTF-8 string straight from wasm memory (recompute the view each call: memory can grow and detach
-        // its ArrayBuffer, same caveat as gfx.js _present). color is 0xRRGGBB.
+        // text_be_draw(x, y, s, n, size, color): a []char lowers to (ptr, len) — here (sPtr, n). REUSE the
+        // pooled span at the current cursor (create it once), update it IN PLACE, and advance. Reusing the
+        // node — and rewriting textContent ONLY when the string actually changed — lets a text selection
+        // survive the per-frame redraw as world signs scroll: replacing the text node (or the element) drops
+        // the selection, but moving it via left/top does not. Decode from wasm memory each call (it can grow
+        // and detach its ArrayBuffer, same caveat as gfx.js _present). color is 0xRRGGBB.
         text_be_draw(x, y, sPtr, n, size, color) {
           self._ensureLayer();
           const str = self._dec.decode(new Uint8Array(self.memory.buffer, sPtr, n));
-          const el = document.createElement("span");
-          el.textContent = str;
-          el.style.position = "absolute";
-          el.style.color = "#" + (color >>> 0 & 0xffffff).toString(16).padStart(6, "0");
-          self.layer.appendChild(el);
-          const rec = { x, y, size, el };
-          self.spans.push(rec);
+          let rec = self.spans[self._cursor];
+          if (!rec) {
+            const el = document.createElement("span");
+            el.style.position = "absolute";
+            self.layer.appendChild(el);
+            rec = { x: 0, y: 0, size: 0, text: null, el };
+            self.spans[self._cursor] = rec;
+          }
+          self._cursor++;
+          if (rec.el.style.display === "none") rec.el.style.display = "";
+          if (rec.text !== str) { rec.el.textContent = str; rec.text = str; } // rewrite only on change → keeps selection
+          rec.el.style.color = "#" + (color >>> 0 & 0xffffff).toString(16).padStart(6, "0");
+          rec.x = x; rec.y = y; rec.size = size;
           self._place(rec);
         },
-        // text_be_clear(): drop every run (redraw / animated HUD).
+        // text_be_clear(): BEGIN a frame — keep the pooled nodes (so a selection on a reused span survives),
+        // hide only the spans the previous frame didn't reuse, and reset the cursor. (A drop in label count
+        // hides its now-unused spans one frame later; the count is usually stable, so this is invisible.)
         text_be_clear() {
-          if (self.layer) self.layer.textContent = "";
-          self.spans = [];
+          for (let i = self._cursor; i < self.spans.length; i++) self.spans[i].el.style.display = "none";
+          self._cursor = 0;
         },
       };
     }
@@ -97,6 +109,7 @@
       if (this.layer && this.layer.parentNode) this.layer.parentNode.removeChild(this.layer);
       this.layer = null;
       this.spans = [];
+      this._cursor = 0;
     }
   }
 
