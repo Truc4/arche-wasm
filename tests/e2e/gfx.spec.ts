@@ -42,8 +42,8 @@ test('the app auto-runs full-screen, paints the scene, and moves the player on â
   await expect(screen).toHaveAttribute('data-status', 'live', { timeout: 5000 }); // first frame painted
 
   const a = await sample(page);
-  expect(a.w).toBe(480);
-  expect(a.h).toBe(360);
+  expect(a.w).toBe(1920);
+  expect(a.h).toBe(1080);
   expect(a.nonbg).toBeGreaterThan(1000); // the scene was actually rasterized, not a blank frame
 
   await page.keyboard.down('ArrowRight'); // hold rightâ€¦

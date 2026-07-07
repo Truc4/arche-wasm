@@ -18,28 +18,33 @@ layers), `PLAYER` (the accent).
 
 ## Scenery elements
 
-- **Blocks** — solid rectangles at world positions, coloured by depth (`FAR`/`MID`/`NEAR`) so nearer
-  shapes are lighter; the eventual round shapes (`gfx.circle`) join the same depth ramp.
-- **Ground** — a solid `BASE` band the player walks along.
-- **Slopes** — angled transitions (needs triangle rasterization; see roadmap).
+- **Floor** — one thin flat `FLOOR` rectangle the player walks along; little vertical real estate so the
+  sky dominates.
+- **Buildings** — solid rectangles of various sizes, bottom-aligned to the floor, coloured from the indigo
+  shade ramp (`S1` dark … `S6` light) for variety/depth.
+- **Hills** — wide `HILL` triangles on the horizon behind the buildings (a small in-scene triangle
+  rasterizer, `draw_hills`; `gfx` has no triangle primitive yet).
+- **Clouds** — soft light `CLOUD` circles up in the sky; **bushes** — small `BUSH` circles on the ground.
+  Both are the one `Round` archetype (filled-circle `draw_round`), separated only by their world y.
+- **Slopes** — angled ground transitions still to come (see roadmap).
 
 ## First pass (shipped): a follow-cam over abstract scenery
 
 `src/scene.arche` — a controllable player with a deadzone follow-camera over solid-colour blocks:
 
-- One long flat **floor** rectangle plus background **buildings** of various sizes at fixed **world**
-  positions in one `Prop` pool, each drawn through `camera.to_screen` → rounded to pixels → `gfx.rect`.
-  Buildings are bottom-aligned to the floor line (world y = 300 − rh/2) and coloured from a cool indigo
-  shade ramp (`S1` dark … `S6` light) for depth/variety.
-- A **player** (the `PLAYER` accent) that shares **nothing** with the scenery: its own world-x `ppx`,
-  its own screen `prx`/`pry`, and its own `draw_player` pass (see the gotcha below).
+- A thin flat **floor** + **buildings** (rects), **hills** (triangles), and **clouds/bushes** (circles),
+  all at fixed **world** positions and projected through `camera.to_screen` → screen pixels. Each shape
+  kind is its OWN archetype (`Prop`, `Hill`, `Round`, `Player`) with its own projected-screen columns and
+  its own draw pass — they share no components (see the gotcha below).
+- A **player** (the `PLAYER` accent): its own world-x `ppx`, its own screen `prx`/`pry`, `draw_player`.
 - Press **←/→ to move the player**. The camera holds still while the player roams a central **deadzone**
   (`±DEADZONE` world units of the eye), then scrolls to trail the player at the deadzone edge — so the
   world scrolls under a player that stays on screen. That "player pins, world scrolls" is the follow-cam
   signal (the camera's cross-pool read of the player: `follow` reads `ppx`, writes `eye`).
 - All colours come from the palette block at the top of the file.
 
-Rects only for now (round shapes as `gfx.circle`, slopes, and parallax come later).
+Round shapes and triangles are drawn by small in-scene rasterizers; a general `gfx.circle` exists, and
+`gfx.triangle` + slopes + parallax come later.
 
 **arche gotcha found here:** writing a component **shared across two archetypes** inside an effectful
 `map … eff` fan misbehaves — the write is either **dropped** (the player's shared `pos.x` never updated) or

@@ -1,62 +1,88 @@
-/// Side-scroller proving the `camera` device as a FOLLOW-CAM. A controllable player walks through a world
-/// of solid-colour blocks in float WORLD coordinates, drawn through `camera.to_screen` → `gfx.rect`. ←/→
-/// move the PLAYER (not the camera); the camera holds still while the player roams a central deadzone, then
-/// scrolls to trail the player once it nears a screen edge — the world scrolls under a fixed-on-screen
-/// player, which is the "camera follows" signal. One clean ABSTRACT palette (a cool indigo depth-ramp plus
-/// a warm player accent) — shapes, not scenery. See docs/scenery.md for the art direction and roadmap.
+/// Side-scroller proving the `camera` device as a FOLLOW-CAM with PARALLAX, over an abstract world of solid
+/// shapes: a thin flat FLOOR, background BUILDINGS (rects) in a cool indigo shade ramp, HILLS (wide
+/// triangles) on the horizon, round CLOUDS in the sky and BUSHES on the ground. Everything lives in float
+/// WORLD coordinates, projected through `camera.to_screen`. ←/→ move the PLAYER (not the camera); the camera
+/// holds still while the player roams a central deadzone, then scrolls to trail it at the edge, so the world
+/// scrolls under a fixed-on-screen player. Depth = PARALLAX + shade: further-back layers scroll slower and
+/// are darker (a per-layer scale on the camera offset, pivoted on the home eye so home positions are exact).
 ///
-/// NOTE on structure: the player's components are ENTIRELY SEPARATE from the scenery `Prop`'s (its own
-/// `ppx`/`prx`/`pry`, its own `draw_player` pass) and share nothing. In arche today, writing a component
-/// that is SHARED across two archetypes inside an effectful `map … eff` fan misbehaves (the write is dropped
-/// or broadcast across pools), so a scenery/player split that shared `pos`/`rx`/`ry` collapsed the world to
-/// one point. Single-archetype column writes (like `Camera.eye.x`) are fine — hence the full separation.
+/// STRUCTURE: each shape kind is its OWN archetype sharing NO components with the others — Prop (rects),
+/// Hill (triangles), Round (circles: clouds + bushes), Player — each with its own projected-screen columns
+/// and its own draw pass. In arche today, writing a component SHARED across archetypes inside an eff-fan
+/// misbehaves (dropped, or broadcast across pools), so the shapes are kept fully separate. See docs/scenery.md.
 #import { gfx camera vec os }
 
-W :: 480;
-H :: 360;
-SPEED    :: 3.0;    // player world-units moved per frame while a key is held
-DEADZONE :: 140.0;  // half-width (world units) the player roams before the camera scrolls to follow it
-PLAYER_Y :: 278.0;  // the player's fixed world y — it walks the ground line (no jumping yet)
-PW :: 28;           // player width  (px)
-PH :: 44;           // player height (px)
+// Rendered at 1080p (16:9). The whole scene is authored in pixel units at zoom 1, so every length/position
+// below is 3× the old 480×360 layout (screen y = world y − 180 here; the floor top sits at screen 960).
+W :: 1920;
+H :: 1080;
+SPEED    :: 9.0;     // player world-units moved per frame while a key is held
+DEADZONE :: 420.0;   // half-width (world units) the player roams before the camera scrolls to follow it
+EYE0     :: 2100.0;  // the home eye x (= initial player x); parallax pivots here so home positions are exact
+PAR_HILL :: 0.5;     // hills' parallax factor (background; scrolls at half the foreground rate)
+PLAYER_Y :: 1089.0;  // player world y (centre): PW×PW square standing with its base on the floor line
+                     // (floor top at screen 960 is world y 1140).
+PW :: 102;           // player size (px) — square
 
 /// Viewport centre in pixels — where the camera's eye lands on screen.
-CENTRE(x, y) :: (240.0, 180.0);
+CENTRE(x, y) :: (960.0, 540.0);
 
-/// Palette — one clean, ABSTRACT system: a flat floor, a cool indigo value-ramp of building shades
-/// (`S1` darkest … `S6` lightest) for variety/depth, and a single warm accent for the player so it reads as
-/// the subject. Swap this block to re-theme everything; nothing else hard-codes a colour.
-CANVAS :: 0x12131c;   // background fill (the "sky")
-FLOOR  :: 0x242742;   // the one long flat floor rectangle
-S1     :: 0x2b2f4e;   // building shades, dark → light
+/// Palette — one clean, ABSTRACT system: a thin floor, a cool indigo value-ramp of building shades
+/// (`S1` darkest/furthest … `S6` lightest/nearest), dark distant hills, soft light clouds, and a single
+/// cool-warm accent for the player. Swap this block to re-theme; nothing else hard-codes a colour.
+CANVAS :: 0x12131c;   // sky / background fill
+FLOOR  :: 0x242742;   // the thin flat floor
+HILL   :: 0x2c3052;   // distant hills (behind the buildings)
+S1     :: 0x2b2f4e;   // building shades, dark/far → light/near
 S2     :: 0x343a5e;
 S3     :: 0x3f4570;
 S4     :: 0x4b5183;
 S5     :: 0x585f96;
 S6     :: 0x656caa;
-PLAYER :: 0xf2c14e;   // the player — the one warm accent
+CLOUD  :: 0x9298cc;   // soft light clouds
+BUSH   :: 0x3f4570;   // ground shrubs (a mid shade)
+PLAYER :: 0xe4694e;   // the player — the one warm accent (a soft coral)
 
 rw     :: int;
 rh     :: int;
 rcolor :: int;
 rx     :: int;
 ry     :: int;
-ppx    :: float;   // player world x (its own scalar — see the structure note above)
+plx    :: float;   // per-building parallax factor (1.0 = foreground/full speed, smaller = further/slower)
+ppx    :: float;   // player world x
 prx    :: int;     // player screen top-left x
 pry    :: int;     // player screen top-left y
+hpx    :: float;   // hill base-centre, world (x/y scalars — a struct-typed component can't be renamed)
+hpy    :: float;
+hhw    :: int;     // hill base half-width (px)
+hht    :: int;     // hill height (px)
+hcol   :: int;
+hsx    :: int;     // hill base-centre, screen
+hsy    :: int;
+cpx    :: float;   // round (cloud/bush) centre, world
+cpy    :: float;
+crad   :: int;     // radius (px)
+ccol   :: int;
+cplx   :: float;   // per-round parallax factor
+csx    :: int;     // round centre, screen
+csy    :: int;
 handle :: window;
 bg     :: int;
 
-/// A solid-colour rectangle in world space: `pos` (world centre), `rw`/`rh` (pixel size), `rcolor`, and the
-/// projected screen top-left `rx`/`ry` that `gfx.rect` draws.
-Prop :: arche { pos, rw, rh, rcolor, rx, ry }
-/// The player, entirely separate from Prop: world x `ppx`, projected screen top-left `prx`/`pry`. Size and
-/// colour are the PW/PH/PLAYER constants; `draw_player` fills it after the scenery so it sits on top.
+/// Solid-colour rectangle: `pos` world centre, `rw`/`rh` px size, `rcolor`, parallax `plx`, screen `rx`/`ry`.
+Prop :: arche { pos, rw, rh, rcolor, plx, rx, ry }
+/// Wide triangle (a hill): world base-centre `hpx`/`hpy`, `hhw` base half-width, `hht` height, apex up.
+Hill :: arche { hpx, hpy, hhw, hht, hcol, hsx, hsy }
+/// Filled circle (cloud in the sky / bush on the ground): world centre `cpx`/`cpy`, `crad` radius, `cplx`.
+Round :: arche { cpx, cpy, crad, ccol, cplx, csx, csy }
+/// The player — its own world x `ppx`, screen top-left `prx`/`pry`; size/colour are the PW/PLAYER consts.
 Player :: arche { ppx, prx, pry }
 Window :: arche { handle, bg }
 Framebuffer :: arche { framebuffer :: [W * H]int }
 
-[10]Prop(9);
+[8]Prop(7);
+[6]Hill(3);
+[8]Round(6);
 [1]Player(1);
 [1]Window ?abort;
 [1]Framebuffer(1);
@@ -68,22 +94,38 @@ boot :: system eff {
   insert(Window { handle: win, bg: CANVAS });
 }
 
-// The world reads as a clear side-scroller: one long flat FLOOR rectangle whose top sits at screen y=240,
-// and background buildings of various sizes/shades all BOTTOM-ALIGNED to that line (world y = 300 − rh/2, so
-// each rises from the floor), spaced apart along x. The player starts at world x=700, standing in a gap on
-// the floor, with the camera centred on it.
+// Clean side-scroller: a thin flat FLOOR (top at screen y=320), buildings bottom-aligned to it (world y =
+// 380 − rh/2), ordered far→near (dark/slow S1 … light/full-speed S6) so they occlude correctly; hills on
+// the horizon; clouds in the sky, bushes on the ground. World y = screen y + 60. Player starts at x=700.
 seed :: system {
-  //             floor    b1     b2     b3     b4     b5     b6     b7      b8
-  Prop.pos.x  = { 700.0,   180.0, 330.0, 470.0, 600.0, 820.0, 980.0, 1180.0, 1360.0 };
-  Prop.pos.y  = { 360.0,   200.0, 240.0, 215.0, 255.0, 225.0, 245.0, 205.0,  235.0  };
-  Prop.rw     = { 3400,    90,    140,   70,    110,   80,    180,   100,    130    };
-  Prop.rh     = { 120,     200,   120,   170,   90,    150,   110,   190,    130    };
-  Prop.rcolor = { FLOOR,   S2,    S5,    S1,    S4,    S3,    S6,    S2,     S4     };
+  //             floor    b1(far) b2     b3      b4     b5     b6(near)
+  Prop.pos.x  = { 2100.0,  1560.0, 600.0, 3750.0, 2760.0, 1080.0, 3240.0 };
+  Prop.pos.y  = { 1200.0,  915.0,  885.0, 900.0,  945.0,  975.0,  990.0  };
+  Prop.rw     = { 12000,   210,    270,   270,    330,    390,    510    };
+  Prop.rh     = { 120,     450,    510,   480,    390,    330,    300    };
+  Prop.rcolor = { FLOOR,   S1,     S2,    S3,     S4,     S5,     S6     };
+  // Parallax factors are exact binary fractions (…/16) — arche's wasm codegen currently mangles inexact
+  // float literals like 0.70 into bad IR, so stick to sums of powers of two here.
+  Prop.plx    = { 1.0,     0.625,  0.6875, 0.75,  0.8125, 0.875,  0.9375 };
 
-  Player.ppx = { 700.0 };
+  //             h1     h2      h3
+  Hill.hpx = { 900.0, 2400.0, 3900.0 };
+  Hill.hpy = { 1140.0, 1140.0, 1140.0 };  // base on the floor line (screen 960)
+  Hill.hhw = { 660,   900,    750    };
+  Hill.hht = { 420,   570,    450    };
+  Hill.hcol = { HILL, HILL,   HILL   };
 
-  Camera.eye.x = { 700.0 };
-  Camera.eye.y = { 240.0 };
+  //             c1(cloud) c2      c3      b1(bush) b2      b3
+  Round.cpx  = { 1050.0,  1950.0, 3150.0, 1440.0,  2280.0, 3450.0 };
+  Round.cpy  = { 540.0,   465.0,  570.0,  1146.0,  1152.0, 1143.0 };  // bushes ~on the floor line (screen 960)
+  Round.crad = { 78,      96,     72,     48,      39,     51     };
+  Round.ccol = { CLOUD,   CLOUD,  CLOUD,  BUSH,    BUSH,   BUSH   };
+  Round.cplx = { 0.25,    0.25,   0.25,   1.0,     1.0,    1.0    };  // clouds drift slow; bushes full-speed
+
+  Player.ppx = { 2100.0 };
+
+  Camera.eye.x = { 2100.0 };
+  Camera.eye.y = { 720.0 };
   Camera.zoom  = { 1.0 };
 }
 
@@ -112,35 +154,126 @@ follow :: system eff {
   };
 }
 
-/// Project the scenery props from world to screen pixels for `gfx.rect`.
+/// Project the scenery rects (floor + buildings) to screen, with per-building PARALLAX: nudge the world x by
+/// `(eye − EYE0)·(1 − plx)` before `camera.to_screen`, so a plx<1 layer scrolls slower than the foreground
+/// while its home position (at eye = EYE0) is unchanged.
 project :: system eff {
   map (query { eye, zoom }) eff {
-    map (query { pos, rw, rh, rx, ry })(rx, ry) eff {
-      s := camera.to_screen(pos, eye, zoom, CENTRE);
+    map (query { pos, rw, rh, plx, rx, ry })(rx, ry) eff {
+      wx := pos.x + (eye.x - EYE0) * (1.0 - plx);
+      s := camera.to_screen(vec.mk(wx, pos.y), eye, zoom, CENTRE);
       rx = i32(s.x) - rw / 2;
       ry = i32(s.y) - rh / 2;
     };
   };
 }
 
-/// Project the player from its (ppx, PLAYER_Y) world point (assembled with `vec.mk`) to its own screen
-/// top-left `prx`/`pry` — a separate column from the scenery's `rx`/`ry`.
+/// Project the hills' base-centres to screen (parallax PAR_HILL).
+project_hill :: system eff {
+  map (query { eye, zoom }) eff {
+    map (query { hpx, hpy, hsx, hsy })(hsx, hsy) eff {
+      wx := hpx + (eye.x - EYE0) * (1.0 - PAR_HILL);
+      s := camera.to_screen(vec.mk(wx, hpy), eye, zoom, CENTRE);
+      hsx = i32(s.x);
+      hsy = i32(s.y);
+    };
+  };
+}
+
+/// Project the round shapes' (clouds/bushes) centres to screen (per-entity parallax `cplx`).
+project_round :: system eff {
+  map (query { eye, zoom }) eff {
+    map (query { cpx, cpy, cplx, csx, csy })(csx, csy) eff {
+      wx := cpx + (eye.x - EYE0) * (1.0 - cplx);
+      s := camera.to_screen(vec.mk(wx, cpy), eye, zoom, CENTRE);
+      csx = i32(s.x);
+      csy = i32(s.y);
+    };
+  };
+}
+
+/// Project the player from its (ppx, PLAYER_Y) world point to its own screen top-left `prx`/`pry` (plx = 1).
 project_player :: system eff {
   map (query { eye, zoom }) eff {
     map (query { ppx, prx, pry })(prx, pry) eff {
       s := camera.to_screen(vec.mk(ppx, PLAYER_Y), eye, zoom, CENTRE);
       prx = i32(s.x) - PW / 2;
-      pry = i32(s.y) - PH / 2;
+      pry = i32(s.y) - PW / 2;
     };
   };
 }
 
-/// Draw the player rectangle (PW×PH in `PLAYER`) into the framebuffer, clamped to the window. Scheduled
-/// after `gfx.rect`, so the player sits on top of the scenery.
+/// Draw the hills: filled flat-bottom triangles, apex up, base on the floor line. Behind the buildings.
+draw_hills :: system (query { framebuffer })(framebuffer) eff {
+  map (query { hsx, hsy, hhw, hht, hcol }) eff {
+    apex := hsy - hht;
+    yy := apex;
+    if (yy < 0) {
+      yy = 0;
+    }
+    ybase := hsy;
+    if (ybase > H) {
+      ybase = H;
+    }
+    for (; yy < ybase;) {
+      half := hhw * (yy - apex) / hht;   // 0 at apex → hhw at base
+      x0 := hsx - half;
+      x1 := hsx + half;
+      if (x0 < 0) {
+        x0 = 0;
+      }
+      if (x1 > W) {
+        x1 = W;
+      }
+      xx := x0;
+      for (; xx < x1;) {
+        framebuffer[yy * W + xx] = hcol;
+        xx = xx + 1;
+      }
+      yy = yy + 1;
+    }
+  };
+}
+
+/// Draw the round shapes: filled circles (clouds and bushes), clamped to the window.
+draw_round :: system (query { framebuffer })(framebuffer) eff {
+  map (query { csx, csy, crad, ccol }) eff {
+    r2 := crad * crad;
+    yy := csy - crad;
+    ylim := csy + crad + 1;
+    if (yy < 0) {
+      yy = 0;
+    }
+    if (ylim > H) {
+      ylim = H;
+    }
+    for (; yy < ylim;) {
+      xx := csx - crad;
+      xlim := csx + crad + 1;
+      if (xx < 0) {
+        xx = 0;
+      }
+      if (xlim > W) {
+        xlim = W;
+      }
+      for (; xx < xlim;) {
+        dx := xx - csx;
+        dy := yy - csy;
+        if (dx * dx + dy * dy <= r2) {
+          framebuffer[yy * W + xx] = ccol;
+        }
+        xx = xx + 1;
+      }
+      yy = yy + 1;
+    }
+  };
+}
+
+/// Draw the player square (PW×PW in `PLAYER`) into the framebuffer, clamped to the window; on top.
 draw_player :: system (query { framebuffer })(framebuffer) eff {
   map (query { prx, pry }) eff {
     y0 := pry;
-    y1 := pry + PH;
+    y1 := pry + PW;
     if (y0 < 0) {
       y0 = 0;
     }
@@ -171,12 +304,20 @@ done :: map (Closed) eff {
   os.exit(0)(_:);
 }
 
+// Draw order (back → front): clear sky → hills → clouds/bushes → floor+buildings → player. The round shapes
+// draw BEFORE the floor+buildings, so the flat floor clips the bushes' lower halves (they sit behind it) and
+// the buildings occlude anything behind them. Clouds sit high where nothing overlaps, so they read as sky.
 #run {
   seq(
     {
       boot,
       seed,
-      forever(seq({ walk, follow, project, project_player, gfx.clear, gfx.rect, draw_player, gfx.present, gfx.poll, done })),
+      forever(seq({
+        walk, follow,
+        project, project_hill, project_round, project_player,
+        gfx.clear, draw_hills, draw_round, gfx.rect, draw_player,
+        gfx.present, gfx.poll, done,
+      })),
     },
   )
 }
