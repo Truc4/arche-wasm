@@ -10,7 +10,7 @@
 /// Hill (triangles), Round (circles: clouds + bushes), Player — each with its own projected-screen columns
 /// and its own draw pass. In arche today, writing a component SHARED across archetypes inside an eff-fan
 /// misbehaves (dropped, or broadcast across pools), so the shapes are kept fully separate. See docs/scenery.md.
-#import { gfx camera vec os }
+#import { gfx camera vec os text }
 
 // RESOLUTION: the render HEIGHT is fixed at H=1080 (a 1080p-tall image); the render WIDTH is dynamic — the
 // host (gfx.js) sizes it to the window aspect each frame and reports it via `gfx.dims`. So the scene fills
@@ -322,6 +322,14 @@ draw_player :: system (query { framebuffer })(framebuffer) eff {
   };
 }
 
+/// Draw the static HUD once via the `text` device (DOM backend): the host creates positioned <span>s over
+/// the canvas, which persist as the world scrolls beneath them. This runs in the arche_run PREFIX (before
+/// `forever`), so it fires exactly once. Coords are render pixels (H=1080); colours reuse the palette.
+draw_hud :: system eff {
+  text.draw(48, 60, "arche-wasm", 64, 0xffffff)();
+  text.draw(48, 132, "text device: DOM backend", 32, CLOUD)();
+}
+
 done :: map (Closed) eff {
   os.exit(0)(_:);
 }
@@ -334,6 +342,7 @@ done :: map (Closed) eff {
     {
       boot,
       seed,
+      draw_hud,
       forever(seq({
         walk, follow,
         project, project_hill, project_round, project_player,

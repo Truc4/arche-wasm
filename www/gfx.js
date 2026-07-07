@@ -74,6 +74,10 @@
       this._kd = null;
       this._ku = null;
       this._onResize = null;
+      // The `text` device's DOM backend (text.js): a #text-layer overlay of <span>s above this canvas. It
+      // shares this run's single wasm instance, so its text_be_* imports go in the SAME env object as the
+      // gfx_be_* seams below, and it reads the same linear memory. Harmless if the module imports no text.
+      this.text = new TextLayer();
     }
 
     // Size the canvas backing store to the window: fixed render height, width = height × window aspect
@@ -164,6 +168,8 @@
     get gfxImports() {
       const self = this;
       return {
+        // The `text` device's DOM seams (text_be_draw / text_be_clear) — same env object, same instance.
+        ...self.text.imports,
         // The `log_be_emit` seam: arche's panic policies + the `log` device's wasm backend emit here
         // (level, ptr, len into linear memory). This is the browser log backend — the host owns the sink.
         // level: 0 debug, 1 info, 2 warn, 3 error. Without this import the module fails to instantiate
@@ -177,6 +183,7 @@
           // `h` is the fixed render height (the wasm's requested H). The width is derived from the window
           // aspect, not the wasm's requested width, so the render fills the window with no bars.
           self.renderH = h;
+          self.text.renderH = h;   // text.js maps render px → CSS px by innerHeight/renderH; set before HUD draws
           self._sizeToWindow();
           self._initGL(self.w, self.h);
           if (!self._onResize) {
@@ -206,6 +213,7 @@
       this.instance = instance;
       this.memory = instance.exports.memory;
       this.wasi.memory = instance.exports.memory; // WasiShim reads memory lazily per call
+      this.text.memory = instance.exports.memory; // text.js decodes strings from linear memory (set pre-run)
       if (instance.exports._initialize) instance.exports._initialize(); // reactor: run ctors / wasi init
       instance.exports.arche_run();  // one-shot: alloc-init + open window + seed
       const tick = () => {
@@ -224,6 +232,7 @@
       if (this._ku) window.removeEventListener("keyup", this._ku);
       if (this._onResize) window.removeEventListener("resize", this._onResize);
       this._kd = this._ku = this._onResize = null;
+      this.text.destroy(); // remove the #text-layer overlay + its resize listener
     }
   }
 
