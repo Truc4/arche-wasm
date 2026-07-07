@@ -1,6 +1,11 @@
 # Build artifacts — regenerate with `make wasm`
 www/*.wasm
 *.ll
+build/
+
+# Playwright MCP scratch (screenshots, traces)
+.playwright-mcp/
+build/            # arche's native object cache (from `make dev` / `arche run`)
 
 # Node / Playwright (package-lock.json IS committed)
 node_modules/

@@ -16,7 +16,18 @@ export default defineConfig({
     baseURL: `http://127.0.0.1:${PORT}`,
     trace: 'on-first-retry',
   },
-  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
+  // The gfx demo renders through WebGL; headless Chromium has no GPU, so enable the SwiftShader software
+  // rasterizer (recent Chromium gates it behind this flag) — else gfx.spec sees a lost context and #screen
+  // never reaches "live". Harmless for the compute specs.
+  projects: [
+    {
+      name: 'chromium',
+      use: {
+        ...devices['Desktop Chrome'],
+        launchOptions: { args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] },
+      },
+    },
+  ],
   webServer: {
     command: `python3 -m http.server ${PORT} --directory www --bind 127.0.0.1`,
     url: `http://127.0.0.1:${PORT}/index.html`,

@@ -129,6 +129,15 @@
     get gfxImports() {
       const self = this;
       return {
+        // The `log_be_emit` seam: arche's panic policies + the `log` device's wasm backend emit here
+        // (level, ptr, len into linear memory). This is the browser log backend — the host owns the sink.
+        // level: 0 debug, 1 info, 2 warn, 3 error. Without this import the module fails to instantiate
+        // (LinkError), which reads as a black screen.
+        log_be_emit(level, ptr, len) {
+          const s = self.wasi._dec.decode(new Uint8Array(self.memory.buffer, ptr, len));
+          self.wasi.stderr += s;
+          (level >= 3 ? console.error : level >= 2 ? console.warn : level >= 1 ? console.info : console.debug)(s);
+        },
         gfx_be_open(w, h, _titlePtr) {
           self.w = w;
           self.h = h;

@@ -29,8 +29,8 @@ its `fd_write` (stdout) and shown on the page. No server round-trip, no framewor
 ## Build & run in a browser
 
 ```sh
-make wasm                              # src/*.arche → www/*.wasm
-python3 -m http.server 8000 -d www     # open http://localhost:8000
+make serve                             # builds src/*.arche → www/*.wasm, then serves www/
+                                       # open http://localhost:8000 (override: make serve PORT=9000)
 ```
 
 ## End-to-end tests

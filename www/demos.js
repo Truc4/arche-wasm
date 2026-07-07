@@ -23,7 +23,17 @@ async function runCompute(name) {
     if (!resp.ok) throw new Error("could not fetch " + name + ".wasm (" + resp.status + ")");
     const bytes = await resp.arrayBuffer(); // arrayBuffer path → no application/wasm MIME needed
     const shim = new WasiShim([name]);
-    const { instance } = await WebAssembly.instantiate(bytes, shim.imports);
+    // Compute demos have no canvas, but core's abort policies still import `log_be_emit` (a bounds/divide
+    // panic emits through it). Provide the browser log backend here too — captured into stderr + console —
+    // else a panicking module (e.g. primes) fails to instantiate. (level: 0 debug .. 3 error.)
+    const env = {
+      log_be_emit(level, ptr, len) {
+        const s = new TextDecoder().decode(new Uint8Array(shim.memory.buffer, ptr, len));
+        shim.stderr += s;
+        (level >= 3 ? console.error : level >= 2 ? console.warn : console.info)(s);
+      },
+    };
+    const { instance } = await WebAssembly.instantiate(bytes, Object.assign({}, shim.imports, { env }));
     shim.start(instance);
     out.textContent = shim.stdout + (shim.stderr ? "\n[stderr] " + shim.stderr : "");
     out.dataset.status = "done";

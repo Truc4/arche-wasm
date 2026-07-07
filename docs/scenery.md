@@ -1,42 +1,52 @@
 # Scenery & art direction
 
-The look is a **Super Mario World–esque side-scroller**: simple geometric shapes in the
-background — round hills, bushes, slopes — behind a foreground the player moves through.
+The look is a **clean, abstract side-scroller**: simple geometric shapes — solid rectangles (blocks,
+bands) with round shapes to come — arranged as depth layers behind a player that moves through them.
+Not representational (no literal hills/bushes/sky); the world reads as **composed shapes**, not scenery.
 
 ## Palette
 
 Everything is **solid colors** drawn from **one clean, well-defined palette**. No gradients, no
-textures — flat fills only, so the whole game reads as a single deliberate color system.
+textures — flat fills only, so the whole scene reads as a single deliberate color system.
 
-The palette lives in **one place in code** as named color constants (0xRRGGBB), so the entire
-look can be re-themed by editing that block alone. Nothing else hard-codes a color; scenery and
-entities reference palette names (`SKY`, `HILL`, `HILL_SHADE`, `BUSH`, `GROUND`, `PLAYER`, …).
-
-Shades of a base hue are part of the palette (e.g. `HILL` and a darker `HILL_SHADE`) so shapes can
-have a little depth while staying flat-colored.
+The look is a **cool value-ramp for depth plus one warm accent for the subject**: the background layers
+step from dark (far) to light (near) in a single cool hue, and the player is the lone warm colour so it
+reads as the subject. The palette lives in **one place in code** as named constants (0xRRGGBB), so the
+whole look re-themes by editing that block alone — nothing else hard-codes a colour. Names are **abstract
+depth roles**, not objects: `CANVAS` (background), `BASE` (ground band), `FAR`/`MID`/`NEAR` (background
+layers), `PLAYER` (the accent).
 
 ## Scenery elements
 
-- **Round hills** — large low circles/half-discs on the horizon, in `HILL` with a `HILL_SHADE` band.
-- **Bushes** — small clusters of overlapping circles, `BUSH`.
-- **Slopes** — angled ground transitions (needs triangle rasterization; see roadmap).
-- **Ground** — solid rectangle band(s) the player stands on, `GROUND`.
+- **Blocks** — solid rectangles at world positions, coloured by depth (`FAR`/`MID`/`NEAR`) so nearer
+  shapes are lighter; the eventual round shapes (`gfx.circle`) join the same depth ramp.
+- **Ground** — a solid `BASE` band the player walks along.
+- **Slopes** — angled transitions (needs triangle rasterization; see roadmap).
 
-## First pass (shipped): prove the camera
+## First pass (shipped): a follow-cam over abstract scenery
 
-`src/scene.arche` — the minimum that makes it **obvious the camera works**:
+`src/scene.arche` — a controllable player with a deadzone follow-camera over solid-colour blocks:
 
-- A handful of solid-colour props (a ground band, blocky hills, bushes, and a red landmark) at fixed
-  **world** positions, all in one `Prop` pool.
-- Each prop is drawn through `camera.to_screen` → rounded to pixels → `gfx.rect`.
-- Press **←/→ to pan the camera**: the whole world scrolls past, which is the camera-works signal
-  (verified: the landmark slides off-centre and back as you pan).
+- One long flat **floor** rectangle plus background **buildings** of various sizes at fixed **world**
+  positions in one `Prop` pool, each drawn through `camera.to_screen` → rounded to pixels → `gfx.rect`.
+  Buildings are bottom-aligned to the floor line (world y = 300 − rh/2) and coloured from a cool indigo
+  shade ramp (`S1` dark … `S6` light) for depth/variety.
+- A **player** (the `PLAYER` accent) that shares **nothing** with the scenery: its own world-x `ppx`,
+  its own screen `prx`/`pry`, and its own `draw_player` pass (see the gotcha below).
+- Press **←/→ to move the player**. The camera holds still while the player roams a central **deadzone**
+  (`±DEADZONE` world units of the eye), then scrolls to trail the player at the deadzone edge — so the
+  world scrolls under a player that stays on screen. That "player pins, world scrolls" is the follow-cam
+  signal (the camera's cross-pool read of the player: `follow` reads `ppx`, writes `eye`).
 - All colours come from the palette block at the top of the file.
 
-Rects only for now (round hills, bushes as `gfx.circle`, and slopes come later). And this pass **pans the
-camera directly** rather than driving a player the camera follows — a follow-cam is the very next step
-(it needs a cross-pool "camera reads the player's position" pattern; panning the camera in its own fan was
-the clean first proof).
+Rects only for now (round shapes as `gfx.circle`, slopes, and parallax come later).
+
+**arche gotcha found here:** writing a component **shared across two archetypes** inside an effectful
+`map … eff` fan misbehaves — the write is either **dropped** (the player's shared `pos.x` never updated) or
+**broadcast across pools** (a system writing the shared `rx,ry` for just the player wrote it to every
+scenery prop too, collapsing the world to one point). Single-archetype writes are fine (the camera's
+`eye.x`). Fix: give the player **entirely its own components** (`ppx`,`prx`,`pry`) and its own draw pass —
+share nothing written per-frame with `Prop`.
 
 ## Eventual plan (work toward, incrementally)
 
